@@ -59,6 +59,7 @@ print("BPDNDictLearn solve time: %.2fs" % d.timer.elapsed('solve'))
 
 #%% display initial and final dictionaries
 
+z=d.getdict()
 D1 = d.getdict().reshape((8, 8, D0.shape[1]))
 D0 = D0.reshape(8, 8, D0.shape[-1])
 fig = plot.figure(figsize=(14, 7))
@@ -75,16 +76,19 @@ plt.imshow(img)
 
 #%%
 
-epsilon = 2
+epsilon = 1
 
-#s11 = np.reshape(S1, (1,np.prod(S1.shape[0:2])))
-S_1 = exim.image('kodim23.png', idxexp=np.s_[-512:,-512:])
-s11 = array.extract_blocks(img,(8,8))
+#s11 = np.reshape(S1, (1,np.prod(S1.shape[0:2])),s11.shape[2]))
+S_1 = exim.image('barbara.png', idxexp=np.s_[-512:,-512:])
+#s11 = array.extract_blocks(img,(8,8))
+s11 = array.extract_blocks(S_1,(8,8))
 s11 = np.reshape(s11,(np.prod(s11.shape[0:2]),s11.shape[2]))
 signalmean = np.mean(s11,axis=0)
 s11 -= signalmean
 
-opt = bpdn.MinL1InL2Ball.Options({'Verbose': True, 'MaxMainIter': 300,
+
+#%%
+opt = bpdn.MinL1InL2Ball.Options({'Verbose': True, 'MaxMainIter': 150,
                                   'RelStopTol': 1e-3, 'rho': 1e0,
                                   'AutoRho': {'Enabled': False}})
 
@@ -92,15 +96,53 @@ b = bpdn.MinL1InL2Ball(d.getdict(), s11, epsilon, opt)
 x = b.solve()
 print("MinL1InL2Ball solve time: %.2fs" % b.timer.elapsed('solve'))
 
+#%%
+
 blksz = (8,8)
-imgout_mean = array.average_blocks(np.dot(d.getdict(),x).reshape(blksz+(-1,))+signalmean, (128,128))
+imgout_mean = array.average_blocks(np.dot(d.getdict(),x).reshape(blksz+(-1,)), (128,128))
 imgout_median = array.combine_blocks(np.dot(d.getdict(),x).reshape(blksz+(-1,))+signalmean, (128,128))
 
-f,ax=plt.subplots(1,2,figsize=(20,4),gridspec_kw={'width_ratios':[2.6,1],'height_ratios':[1]})
+f,ax=plt.subplots(1,2,figsize=(13,4),gridspec_kw={'width_ratios':[2,1],'height_ratios':[1]})
 ax[0].plot(np.hstack(x))
 ax[0].set_title(f'Sparse Representation $\epsilon$ = {epsilon}')
 ax[1].imshow(imgout_mean)
 ax[1].set_title(f"Reconstructed Image $\epsilon$={epsilon}")
+
+#%% LCA
+
+xbar = d.getdict()
+q = np.transpose(np.dot(np.transpose(s11),xbar))
+g = np.dot(np.transpose(xbar),xbar) - np.identity(132)
+
+thres = 1
+tau = 10
+u = np.zeros(np.shape(q))
+n = 20
+for i in range(n): #10 iterations
+    a = np.multiply(u,(np.absolute(u) > thres))
+    #u = 0.9 * u + 0.01 * (q - np.dot(g,a)) 
+    u += (1/tau)*(-u + q - np.dot(g,a)) 
+u = np.multiply(u,(np.absolute(u) > thres))
+    
+imgout_lca = array.average_blocks(np.dot(d.getdict(),u).reshape(blksz+(-1,)), (128,128))
+f2,ax2=plt.subplots(1,2,figsize=(13,4),gridspec_kw={'width_ratios':[2,1],'height_ratios':[1]})
+ax2[0].plot(np.hstack(u))
+ax2[0].set_title(f'LCA Sparse Representation n={n} $\lambda$={thres} $t$={tau}')
+ax2[1].imshow(imgout_lca)
+ax2[1].set_title(f"LCA Reconstructed Image n={n} $\lambda$={thres} $t$={tau}")
+
+print('done')
+#LCA
+
+#%% 
+
+f2,ax2=plt.subplots(1,2,figsize=(13,4),gridspec_kw={'width_ratios':[2,1],'height_ratios':[1]})
+ax2[0].plot(np.hstack(q))
+ax2[0].set_title(f'forward-pass output')
+ax2[1].imshow(array.average_blocks(np.dot(d.getdict(),q).reshape(blksz+(-1,)), (128,128)))
+ax2[1].set_title(f"forward-backward recovery")
+
+
 
 
 
