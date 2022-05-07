@@ -11,6 +11,7 @@ from builtins import input
 import numpy as np
 import scipy.io
 import pickle
+from datetime import datetime
 
 from sporco.dictlrn import bpdndl
 from sporco import util
@@ -78,7 +79,7 @@ def lca_getsc_plot(xbar,feature_2code,thres,tau,n):
     ax2[2].set_title(f"Recovered Feature Q = {nlevels}")
     print(f'feat_class: {get_t1_class(x)}')
     
-def lca_testacc(xbar,tstset,thres,tau,n,verbose=False):
+def lca_testacc(xbar,tstset,thres,tau,n,verbose=False,batchsize=500):
     score=np.zeros(5);
     for idgest,gest in enumerate(tstset):
         for idfv,fv in enumerate(gest):
@@ -87,7 +88,7 @@ def lca_testacc(xbar,tstset,thres,tau,n,verbose=False):
                 score[idgest]=score[idgest]+1;
             else:
                 if(verbose): print(f'{idfv}.\t {get_t1_class(x)} vs {idgest} ({np.argmax(x)})')
-    acc = np.sum(score)/(500*5);
+    acc = np.sum(score)/(batchsize*5);
     if(verbose): print(f'{acc},{score}')
     return score,acc
 
@@ -101,6 +102,28 @@ def bpdn_testacc(dic,tstset,epsilon,verbose=False):
             else:
                 if(verbose): print(f'{idfv}.\t {get_t1_class(x)} vs {idgest} ({np.argmax(x)})')
     acc = np.sum(score)/(500*5);
+    if(verbose): print(f'{acc},{score}')
+    return score,acc
+
+def lca_testacc_stoch(xbar,tstset,thres,tau,n,verbose=False,batchsize=100):
+    if(batchsize > tstset.shape(2)):
+        batchsize = tstset.shape(2)
+    score=np.zeros(5);
+    
+    #obtain subsampled tstset
+    rng = np.random.default_rng()
+    tstset_stoch = np.copy(tstset[:,0:100,:])
+    for i in range(5):
+        tstset_stoch[i] = rng.choice(tstset[1,:,:],100,replace=False,axis=0)
+    
+    for idgest,gest in enumerate(tstset_stoch):
+        for idfv,fv in enumerate(gest):
+            x = lca_getsc(xbar,fv,thres,tau,n)
+            if(get_t1_class(x) == idgest):
+                score[idgest]=score[idgest]+1;
+            else:
+                if(verbose): print(f'{idfv}.\t {get_t1_class(x)} vs {idgest} ({np.argmax(x)})')
+    acc = np.sum(score)/(batchsize*5);
     if(verbose): print(f'{acc},{score}')
     return score,acc
 
@@ -147,33 +170,28 @@ def sliceacc(matrix):
         plt.title(f'n={i*25+50}')
     return
 
-#%% Load test set and dictionary
-
 with open('solardic_128.pickle','rb') as f:
     z1 = pickle.load(f);
 
 tstset0 = scipy.io.loadmat('solarset_128_500.mat');
 tstset = np.reshape(tstset0['series_out'],(5,500,fvsize));
+
+nlevels = 32;
+z1_quant = quantize(z1,nlevels);
         
 
 #%% LCA
 
-feature_2code = tstset[4][498];
-thres = 2
-tau = 70
-n = 100
+feature_2code = tstset_stoch[4][3];
+thres = 0.275
+tau = 50
+n = 5
 x = lca_getsc_plot(z1_quant,feature_2code,thres,tau,n)
 
 #%% bpdn accuracy test
 
 epsilon = 0.5;
 acc,score = bpdn_testacc(z1_quant,tstset,epsilon,verbose=True);
-
-#%% Quantize the crossbar
-
-nlevels = 32;
-z1_quant = quantize(z1,nlevels);
-
 
 #%% LCA accuracy test
 
@@ -193,9 +211,11 @@ x = bpdn_getsc_plot(z1_quant,feature_2code,epsilon);
 
 #%% Sweeping LCA test
 
-thres_list = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-tau_list = [20,30,40,50,60,70,80]
-n_list = [10,20,30,40]
+thres_list = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25,0.275,0.3,0.325,0.35,0.375,0.4,0.425,0.45,0.475,0.5,0.525,0.55,0.575,0.6]
+tau_list = [20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200]
+n_list = [5]
+
+start = datetime.now()
 
 lca_sweeptest_scores = np.zeros((len(thres_list),len(tau_list),len(n_list),5))
 lca_sweeptest_accs = np.zeros((len(thres_list),len(tau_list),len(n_list)))
@@ -204,6 +224,70 @@ for idth,thres in enumerate(thres_list):
         for idn,n in enumerate(n_list):
             lca_sweeptest_scores[idth,idta,idn],lca_sweeptest_accs[idth,idta,idn] = lca_testacc(z1_quant,tstset,thres,tau,n);
             print(f'ttn:({thres},{tau},{n})\t{lca_sweeptest_scores[idth,idta,idn]}\t{lca_sweeptest_accs[idth,idta,idn]}')
+
+print(f'Runtime: {datetime.now()-start}')
+
+#%% Total gradient ascent LCA optimization (maybe work but i can't guarantee convergence)
+
+asc_calcstep_tau = 1;
+asc_calcstep_thres = 0.001;
+asc_n = 10;
+asc_maxIter = 10;
+
+asc_thres_lr_init = 0.01;
+asc_tau_lr_init = 10;
+asc_epsilon = 0.0001;
+
+#initialization
+asc_thres = np.random.random()*0.2+0.1
+asc_tau = np.random.random()*20+30;
+#asc_thres = 0.2598389128954294;
+#asc_tau = 46.00089902104527;
+asc_taustep_acc = 0;
+asc_thresstep_acc = 0;
+asc_tauslope = 0;
+asc_threslope = 0;
+asc_win_thres,asc_win_tau = (asc_thres,asc_tau)
+asc_thres_lr, asc_tau_lr = asc_thres_lr_init,asc_tau_lr_init
+tstset_stoch = np.copy(tstset[:,0:100,:])
+
+#highscores
+asc_ttn_winner = (asc_thres,asc_tau,asc_n)
+asc_acc_winner = 0;
+
+
+
+for asc_i in range(asc_maxIter):
+        
+    #obtain subsampled tstset
+    rng = np.random.default_rng()
+    for i in range(5):
+        tstset_stoch[i] = rng.choice(tstset[i,:,:],100,replace=False,axis=0)
+    
+    s,asc_acc = lca_testacc(z1_quant,tstset_stoch,asc_thres,asc_tau,asc_n,batchsize=100);
+    
+    if(asc_acc > asc_acc_winner):
+        asc_ttn_winner = (asc_thres,asc_tau,asc_n)
+        asc_acc_winner = asc_acc;
+        asc_i_winner = asc_i;
+
+    
+    #approximate the slope of the accuracy
+    s,asc_thresstep_acc = lca_testacc(z1_quant,tstset_stoch,asc_thres - asc_calcstep_thres,asc_tau,asc_n,batchsize=100);
+    s,asc_taustep_acc = lca_testacc(z1_quant,tstset_stoch,asc_thres,asc_tau - asc_calcstep_tau,asc_n,batchsize=100);
+    asc_tauslope = (asc_acc - asc_taustep_acc)/asc_calcstep_tau;
+    asc_threslope = (asc_acc - asc_thresstep_acc)/asc_calcstep_thres;
+    
+    print(f'{asc_i}.\t{asc_acc}:\t[{asc_thres},{asc_tau}]\t[{asc_threslope},{asc_tauslope}]');
+    
+    #update the operating point
+    asc_tau = asc_tau + asc_tau_lr*asc_tauslope;
+    asc_thres = asc_thres + asc_thres_lr*asc_threslope;
+
+print(asc_i_winner,asc_acc_winner)
+s,asc_acc_winner = lca_testacc(z1_quant,tstset,asc_ttn_winner[0],asc_ttn_winner[1],asc_ttn_winner[2]);
+print(asc_acc_winner,asc_ttn_winner)
+    
 
 
 
