@@ -20,6 +20,7 @@ from sporco import plot
 from sporco.admm import bpdn
 from matplotlib import pyplot as plt
 from matplotlib import image as mpimg
+from matplotlib.ticker import FormatStrFormatter
 
 fvsize = 128;
 natoms = 150;
@@ -147,19 +148,20 @@ def bpdn_getsc_plot(dic,fv,epsilon):
     print(f'gest: {np.argmax(abs(x))},{np.floor(np.argmax(abs(x))/150)}')
     return x
     
-def showacc(matrix):
+def showacc(matrix,labelled = True):
     fig, ax = plt.subplots()
     ax.imshow(matrix, cmap='YlOrBr_r',aspect='auto')
-    for i,row in enumerate(matrix):
-       for j,elem in enumerate(row):
-          c = matrix[i, j]
-          ax.text(j, i, str(c), va='center', ha='center')
+    if(labelled):
+        for i,row in enumerate(matrix):
+           for j,elem in enumerate(row):
+              c = matrix[i, j]
+              ax.text(j, i, str(c), va='center', ha='center')
     nox_labels = len(tau_list)
     x_positions = np.arange(0,nox_labels,1)
     plt.xticks(x_positions,tau_list)
-    plt.xlabel('tau')
+    plt.xlabel('tau')   
     noy_labels = len(thres_list)
-    y_positions = np.arange(0,noy_labels,1)
+    y_positions = np.arange(0,noy_labels,1)    
     plt.yticks(y_positions,thres_list)
     plt.ylabel('thres')
           
@@ -176,16 +178,14 @@ with open('solardic_128.pickle','rb') as f:
 tstset0 = scipy.io.loadmat('solarset_128_500.mat');
 tstset = np.reshape(tstset0['series_out'],(5,500,fvsize));
 
-nlevels = 32;
-z1_quant = quantize(z1,nlevels);
         
 
 #%% LCA
 
-feature_2code = tstset_stoch[4][3];
-thres = 0.275
-tau = 50
-n = 5
+feature_2code = tstset[4][233];
+thres = asc_ttn_winner[0]
+tau = asc_ttn_winner[1]
+n = asc_ttn_winner[2]
 x = lca_getsc_plot(z1_quant,feature_2code,thres,tau,n)
 
 #%% bpdn accuracy test
@@ -196,9 +196,9 @@ acc,score = bpdn_testacc(z1_quant,tstset,epsilon,verbose=True);
 #%% LCA accuracy test
 
 xbar = z1_quant;
-thres = 2
-tau = 70
-n = 100
+thres = 0.2773298211064743
+tau = 42.02236657044855
+n = 10
 score,acc = lca_testacc(z1_quant,tstset,thres,tau,n,verbose=True);
 
             
@@ -211,8 +211,11 @@ x = bpdn_getsc_plot(z1_quant,feature_2code,epsilon);
 
 #%% Sweeping LCA test
 
-thres_list = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25,0.275,0.3,0.325,0.35,0.375,0.4,0.425,0.45,0.475,0.5,0.525,0.55,0.575,0.6]
-tau_list = [20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200]
+#thres_list = np.linspace(asc_calcstep_thres*-8,7*asc_calcstep_thres,16) + asc_ttn_winner[0]
+#tau_list = np.linspace(-8*asc_calcstep_tau,7*asc_calcstep_tau,16) + asc_ttn_winner[1]
+tau_list = np.linspace(50,70,64)
+thres_list = np.linspace(0,0.3,128)
+
 n_list = [5]
 
 start = datetime.now()
@@ -224,23 +227,28 @@ for idth,thres in enumerate(thres_list):
         for idn,n in enumerate(n_list):
             lca_sweeptest_scores[idth,idta,idn],lca_sweeptest_accs[idth,idta,idn] = lca_testacc(z1_quant,tstset,thres,tau,n);
             print(f'ttn:({thres},{tau},{n})\t{lca_sweeptest_scores[idth,idta,idn]}\t{lca_sweeptest_accs[idth,idta,idn]}')
-
+showacc(lca_sweeptest_accs,labelled=False)
 print(f'Runtime: {datetime.now()-start}')
 
-#%% Total gradient ascent LCA optimization (maybe work but i can't guarantee convergence)
+#%% Quantize Levels
 
-asc_calcstep_tau = 1;
+nlevels = 16
+z1_quant = quantize(z1,nlevels);
+
+#%% Total gradient ascent LCA optimization (maybe work but i can't guarantee convergence
+
+asc_calcstep_tau = 0.3;
 asc_calcstep_thres = 0.001;
-asc_n = 10;
-asc_maxIter = 10;
-
-asc_thres_lr_init = 0.01;
+asc_n = 5;
+asc_maxEpochs = 4;
+asc_batchsize = 100;
+asc_thres_lr_init = 0.005;
 asc_tau_lr_init = 10;
 asc_epsilon = 0.0001;
 
 #initialization
 asc_thres = np.random.random()*0.2+0.1
-asc_tau = np.random.random()*20+30;
+asc_tau = np.random.random()*20+50;
 #asc_thres = 0.2598389128954294;
 #asc_tau = 46.00089902104527;
 asc_taustep_acc = 0;
@@ -249,47 +257,82 @@ asc_tauslope = 0;
 asc_threslope = 0;
 asc_win_thres,asc_win_tau = (asc_thres,asc_tau)
 asc_thres_lr, asc_tau_lr = asc_thres_lr_init,asc_tau_lr_init
-tstset_stoch = np.copy(tstset[:,0:100,:])
 
 #highscores
 asc_ttn_winner = (asc_thres,asc_tau,asc_n)
 asc_acc_winner = 0;
+asc_prevacc = 0;
 
 
 
-for asc_i in range(asc_maxIter):
-        
+for asc_i in range(asc_maxEpochs):
+    
     #obtain subsampled tstset
     rng = np.random.default_rng()
-    for i in range(5):
-        tstset_stoch[i] = rng.choice(tstset[i,:,:],100,replace=False,axis=0)
+    tstset_stoch = np.zeros((int(tstset.shape[1]/asc_batchsize),tstset.shape[0],asc_batchsize,tstset.shape[2]))
+    for p in range(nclasses):
+        idxrand = rng.choice(range(tstset.shape[1]),tstset.shape[1],replace=False) #recalculate another 500 numbers
+        for pp in range(int(tstset.shape[1]/asc_batchsize)):
+            #populate class p for all batches pp
+            tstset_stoch[pp][p] = tstset[p][idxrand[asc_batchsize*pp:asc_batchsize*(pp+1)]]
     
-    s,asc_acc = lca_testacc(z1_quant,tstset_stoch,asc_thres,asc_tau,asc_n,batchsize=100);
-    
-    if(asc_acc > asc_acc_winner):
-        asc_ttn_winner = (asc_thres,asc_tau,asc_n)
-        asc_acc_winner = asc_acc;
-        asc_i_winner = asc_i;
+    for batch in range(int(tstset.shape[1]/asc_batchsize)):
+        s,asc_acc = lca_testacc(z1_quant,tstset_stoch[batch],asc_thres,asc_tau,asc_n,batchsize=asc_batchsize);
+        
+        if(asc_acc < asc_prevacc):
+            print(f'Backtracking:{asc_acc,asc_prevacc,asc_thres,asc_tau}')
+            #asc_tau_lr = asc_tau_lr/2;
+            #asc_thres_lr = asc_thres_lr/2;
+            #asc_tau = asc_tau - asc_tau_lr*asc_tauslope;
+            #asc_thres = asc_thres - asc_thres_lr*asc_tauslope;        
+            #s,asc_acc = lca_testacc(z1_quant,tstset_stoch[batch],asc_thres,asc_tau,asc_n,batchsize=100);
+            asc_tau = asc_tau - asc_tau_lr*asc_tauslope + asc_calcstep_tau;
+            asc_thres = asc_thres - asc_thres_lr*asc_threslope + asc_calcstep_thres;         
+            #asc_acc = asc_prevacc        
+            s,asc_acc = lca_testacc(z1_quant,tstset_stoch[batch],asc_thres,asc_tau,asc_n,batchsize=asc_batchsize);
+            print(f'Backtracked:{asc_acc,asc_thres,asc_tau}')
+        asc_thres_lr, asc_tau_lr = asc_thres_lr_init,asc_tau_lr_init
+        
+        if(asc_acc > asc_acc_winner):
+            asc_ttn_winner = (asc_thres,asc_tau,asc_n)
+            asc_acc_winner = asc_acc;
+            asc_i_winner = asc_i;
+            asc_batch_winner = batch;
+        
+        #approximate the slope of the accuracy
+        s,asc_thresstep_acc = lca_testacc(z1_quant,tstset_stoch[batch],asc_thres + asc_calcstep_thres,asc_tau,asc_n,batchsize=asc_batchsize);
+        s,asc_taustep_acc = lca_testacc(z1_quant,tstset_stoch[batch],asc_thres,asc_tau + asc_calcstep_tau,asc_n,batchsize=asc_batchsize);
+        asc_tauslope = (asc_taustep_acc - asc_acc)/asc_calcstep_tau;
+        asc_threslope = (asc_thresstep_acc - asc_acc)/asc_calcstep_thres;
+        
+        print(f'Epoch {asc_i}\tBatch {batch}.\t{asc_acc}:\t[{asc_thres},{asc_tau}]\t[{asc_threslope},{asc_tauslope}]');
+        
+        #update the operating point
+        asc_tau = asc_tau + asc_tau_lr*asc_tauslope;
+        asc_thres = asc_thres + asc_thres_lr*asc_threslope;
+        asc_prevacc = asc_acc;
+        
+        #convergence condition
+        #if(abs(asc_tauslope) < 0.0001):
+            #if(abs(asc_threslope) < 0.0001):
+                #break;
 
-    
-    #approximate the slope of the accuracy
-    s,asc_thresstep_acc = lca_testacc(z1_quant,tstset_stoch,asc_thres - asc_calcstep_thres,asc_tau,asc_n,batchsize=100);
-    s,asc_taustep_acc = lca_testacc(z1_quant,tstset_stoch,asc_thres,asc_tau - asc_calcstep_tau,asc_n,batchsize=100);
-    asc_tauslope = (asc_acc - asc_taustep_acc)/asc_calcstep_tau;
-    asc_threslope = (asc_acc - asc_thresstep_acc)/asc_calcstep_thres;
-    
-    print(f'{asc_i}.\t{asc_acc}:\t[{asc_thres},{asc_tau}]\t[{asc_threslope},{asc_tauslope}]');
-    
-    #update the operating point
-    asc_tau = asc_tau + asc_tau_lr*asc_tauslope;
-    asc_thres = asc_thres + asc_thres_lr*asc_threslope;
-
-print(asc_i_winner,asc_acc_winner)
+print(asc_i_winner,batch,asc_acc_winner)
 s,asc_acc_winner = lca_testacc(z1_quant,tstset,asc_ttn_winner[0],asc_ttn_winner[1],asc_ttn_winner[2]);
-print(asc_acc_winner,asc_ttn_winner)
+print(asc_acc_winner,s,asc_ttn_winner)
+
+#%%
+
+with open('q16n5sweep.pickle','rb') as f:
+    acc_old = pickle.load(f);
     
-
-
+    
+#%%
+plt.title('Accuracy Q=16 N=5');
+plt.xlabel(r'$\tau$');
+plt.ylabel('$\lambda$');
+plt.imshow(acc_array,cmap='magma',vmin=0.7,vmax=1,extent=(30,50,0.3,0),aspect=40/0.3);
+plt.colorbar();
 
 
 
