@@ -13,8 +13,18 @@ import pickle
 from sporco.dictlrn import bpdndl
 from matplotlib import pyplot as plt
 
+def plotdic(dic,title=''):
+    plotshape = int(np.sqrt(dic.shape[1]))
+    fig, ax = plt.subplots(plotshape,plotshape)
+    for i,ax_row in enumerate(ax):
+        for j,axes in enumerate(ax_row):
+            axes.set_yticklabels([])
+            axes.set_xticklabels([])
+            axes.plot(dic[:,i*5+j]);
+    fig.suptitle(title)
+
 fvsize = 128;
-natoms = 150;
+natoms = 10;
 
 trset0 = scipy.io.loadmat('solarset_128_100.mat');
 trset = np.reshape(trset0['series_out'],(5,100,fvsize));
@@ -36,19 +46,12 @@ for n in range(5):
     print("BPDNDictLearn solve time: %.2fs" % d.timer.elapsed('solve'))
     z[n]=d.getdict()
 
-z1 = z.transpose(1,0,2)
-z1 = z1.reshape(fvsize,natoms*5)
+z1_newtrain = z.transpose(1,0,2)
+z1_newtrain = z1_newtrain.reshape(fvsize,natoms*5)
+
+plotdic(z1_newtrain,title=f'BPDN {natoms} atoms per class')
 
 #%%
 
-fig, ax = plt.subplots(5,10);
-for i,ax_row in enumerate(ax):
-    for j,axes in enumerate(ax_row):
-        axes.set_yticklabels([])
-        axes.set_xticklabels([])
-        axes.plot(np.transpose(z[i][j]));
-
-#%%
-
-with open('solardic_128.pickle','wb') as f:
-    pickle.dump(z1, f, protocol=pickle.HIGHEST_PROTOCOL)
+with open('z10.pickle','wb') as f:
+    pickle.dump(z1_newtrain, f, protocol=pickle.HIGHEST_PROTOCOL)
