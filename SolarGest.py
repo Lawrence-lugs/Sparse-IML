@@ -5,6 +5,8 @@ Created on Wed Mar 30 10:30:21 2022
 @author: Lawrence
 """
 
+#%%
+
 from __future__ import division, print_function
 from builtins import input
 
@@ -111,17 +113,15 @@ def lca_testacc(xbar,tstset,thres,tau,n,verbose=False,batchsize=500):
     return score,acc
 
 def lca_testreconstruction(xbar,tstset,thres,tau,n,verbose=False,batchsize=500):
-    score=np.zeros(5);
     normsum=0;
     for idgest,gest in enumerate(tstset):
         for idfv,fv in enumerate(gest):
             x = lca_getsc(xbar,fv,thres,tau,n)
             nerm = np.linalg.norm(np.dot(xbar,x)-fv)
             normsum = normsum+nerm
-            if(verbose): print(f'{idgest},{idfv}. l2norm: {nerm}')
     acc = normsum/(batchsize*5);
     if(verbose): print(f'{acc}')
-    return score,acc
+    return acc
 
 def bpdn_testacc(dic,tstset,epsilon,verbose=False):
     score=np.zeros(5);
@@ -225,9 +225,9 @@ z1_qvar = quantizewithvariation(z1,relative=1)
 feature_2code = tstset[0][233];
 feature_2code = tstset[np.random.randint(0,5)][np.random.randint(0,500)];
 thres = 0.25
-tau = 46
-n = 2
-x = lca_getsc_plot(z10_qvar,feature_2code,thres,tau,n)
+tau = 45
+n = 10000
+x = lca_getsc_plot(z25,feature_2code,thres,tau,n)
 
 #%% bpdn accuracy test
 
@@ -254,21 +254,24 @@ x = bpdn_getsc_plot(z_random,feature_2code,epsilon);
 
 #thres_list = np.linspace(asc_calcstep_thres*-8,7*asc_calcstep_thres,16) + asc_ttn_winner[0]
 #tau_list = np.linspace(-8*asc_calcstep_tau,7*asc_calcstep_tau,16) + asc_ttn_winner[1]
-tau_list = np.linspace(30,70,64)
-thres_list = np.linspace(0,0.3,64)
+tau_list = np.linspace(10,60,64)
+thres_list = np.linspace(0.05,0.4,64)
 dic_list = (z1_quant,z50_quant,z25_quant,z10_quant)
 
-n_list = [2]
+n_list = [2,5]
 
 start = datetime.now()
 
 lca_sweeptest_scores = np.zeros((len(thres_list),len(tau_list),len(n_list),5))
 lca_sweeptest_accs = np.zeros((len(dic_list),len(thres_list),len(tau_list),len(n_list)))
+lca_sweeptest_reconaccs = np.zeros((len(dic_list),len(thres_list),len(tau_list),len(n_list)))
 for idic,dic in enumerate(dic_list):
     for idth,thres in enumerate(thres_list):
         for idta,tau in enumerate(tau_list):
             for idn,n in enumerate(n_list):
                 lca_sweeptest_scores[idth,idta,idn],lca_sweeptest_accs[idic,idth,idta,idn] = lca_testacc(dic,tstset_stoch[0],thres,tau,n,batchsize=100);
+                #lca_sweeptest_reconaccs[idic,idth,idta,idn] = lca_testreconstruction(dic,tstset_stoch[0],thres,tau,n,batchsize=100);
+                #print(f'ttn:({thres},{tau},{n})\t{lca_sweeptest_reconaccs[idic,idth,idta,idn]}')
                 print(f'ttn:({thres},{tau},{n})\t{lca_sweeptest_scores[idth,idta,idn]}\t{lca_sweeptest_accs[idic,idth,idta,idn]}')
 print(f'Runtime: {datetime.now()-start}')
 
@@ -299,8 +302,8 @@ asc_tau_lr_init = 10;
 asc_epsilon = 0.0001;
 
 #initialization
-asc_thres = np.random.random()*0.2+0.1
-asc_tau = np.random.random()*20+40;
+asc_thres = np.random.random()*0.2+0.1;
+asc_tau = np.random.random()*20+30;
 #asc_thres = 0.2598389128954294;
 #asc_tau = 46.00089902104527;
 asc_taustep_acc = 0;
@@ -315,7 +318,12 @@ asc_ttn_winner = (asc_thres,asc_tau,asc_n)
 asc_acc_winner = 0;
 asc_prevacc = 0;
 
-z_touse = z10_quant;
+#points traversed
+ptstraversed = np.zeros((asc_maxEpochs,int(tstset.shape[1]/asc_batchsize),2))
+pt_i = 0;
+
+z_touse = z1;
+
     
 for asc_i in range(asc_maxEpochs):
     
@@ -360,6 +368,8 @@ for asc_i in range(asc_maxEpochs):
         print(f'Epoch {asc_i}\tBatch {batch}.\t{asc_acc}:\t[{asc_thres},{asc_tau}]\t[{asc_threslope},{asc_tauslope}]');
         
         #update the operating point
+        pt_i = pt_i+1
+        ptstraversed[pt_i] = (asc_thres,asc_tau)
         asc_tau = asc_tau + asc_tau_lr*asc_tauslope;
         asc_thres = asc_thres + asc_thres_lr*asc_threslope;
         asc_prevacc = asc_acc;
@@ -380,59 +390,71 @@ with open('q16n5sweep.pickle','rb') as f:
     
     
 #%%
-plt.title('Accuracy K=10 Q=10 N=2');
-plt.xlabel(r'$\tau$');
-plt.ylabel('$\lambda$');
-plt.imshow(lca_sweeptest_accs[3],cmap='magma',vmin=0.9,vmax=1,extent=(30,70,0.3,0),aspect=40/0.3);
-plt.colorbar();
+fig,ax = plt.subplots(1,2,sharey=True,sharex=True,figsize=(4.5,1.5))
+for i,n in enumerate(n_list):
+    ax[i].set_title(f'N={n} K=150',fontsize=10);
+    ax[i].set_xlabel(r'$\tau$');
+    ax[i].set_ylabel('$\lambda$');
+    polt = ax[i].imshow(lca_sweeptest_accs[0,:,:,i],vmin=0,vmax=1,cmap='magma',extent=(10,60,0.4,0.05),aspect=50/(0.4-0.05));
+fig.colorbar(polt,ax=fig.get_axes());
 
 
 #%% Variation Histogram Maker
 
 nsamp = 200
-results_hist = np.zeros((4,4,nsamp))
+results_hist = np.zeros((4,nsamp))
 thres =  0.09386287243352415
 tau = 59.346896752542456
 n = 2
-qlevels = [5,9,16,32]
+qlevels = 16
 r = [1.5,1,0.5,0.25]
 
-for q_i,qlevel in enumerate(qlevels):
-    for rel_i,rel in enumerate(r):
-        for var_i in range(nsamp):
-            z_touse = quantizewithvariation(z1,relative=rel,nlevels=qlevel);
-            s,acc = lca_testacc(z_touse, tstset_stoch[0], thres, tau, n,batchsize=100)
-            print(s,acc)
-            results_hist[q_i][rel_i][var_i] = acc
-        
+for rel_i,rel in enumerate(r):
+    for var_i in range(nsamp):
+        z_touse = quantizewithvariation(z50,relative=rel,nlevels=qlevels);
+        s,acc = lca_testacc(z_touse, tstset_stoch[0], thres, tau, n,batchsize=100)
+        print(s,acc)
+        results_hist[rel_i][var_i] = acc
+            
+#%%
+
+z1_results_hist = results_hist
 
 #%%
 i = 3;
-plt.title(f'K=10 $\ttau={tau:.2f},\lambda={thres:.3f}$,n={n},Q={qlevels[i]}')
-plt.hist(results_hist[i],bins=20,alpha=0.8)
-plt.xlabel('Accuracy')
+plt.title(f'K=50 $\ttau={tau:.2f},\lambda={thres:.3f}$,n={n},Q={qlevels}')
+plt.hist(results_hist[0],bins=20,alpha=0.7)
+plt.hist(results_hist[1],bins=20,alpha=0.7)
+plt.hist(results_hist[2],bins=20,alpha=0.7)
+plt.hist(results_hist[3],bins=20,alpha=0.7)
+plt.xlabel('Classification Accuracy')
+plt.legend(['$\sigma=1.5\Delta L_Q$','$\sigma=\Delta L_Q$','$\sigma=0.5\Delta L_Q$','$\sigma=0.1\Delta L_Q$'])
 
 #%%
 
-qlist = range(4,17)
-outputline = np.zeros((4,13))
+qlist = range(4,33)
 diclist = [z10,z25,z50,z1]
 
 thres = 0.25;
 tau = 40;
-n = 2;
+nlist = 45;
+outputline = np.zeros((4,50-2))
 
 for dic_i,dic in enumerate(diclist):
     for lawrence_i,q in enumerate(qlist):
         z_touse = quantize(dic,q);
-        s,outputline[dic_i][lawrence_i] = lca_testacc(z_touse,tstset,thres,tau,n);
-
+        outputline[dic_i][lawrence_i] = lca_testreconstruction(z_touse,tstset_stoch[0],thres,tau,n,batchsize=100,verbose=True);
 
 
 #%%
-plt.plot(qlist,np.transpose(outputline))
+plt.plot(qlist,np.transpose(outputline[:,:29]))
 plt.legend(['K=10','K=25','K=50','K=150'])
 plt.xlabel('Q')
-plt.ylabel('Classification Accuracy')
+plt.ylabel('Reconstruction Error')
 
+#%%
+subject = lca_sweeptest_accs[3,:,:,1]
+np.unravel_index(np.argmax(subject),(subject.shape))
+anspair = thres_list[np.unravel_index(np.argmax(subject),subject.shape)[0]],tau_list[np.unravel_index(np.argmax(subject),subject.shape)[1]]
+print(f'({anspair[0]:.3f},{anspair[1]:.3f}),{np.max(subject)}')
 
